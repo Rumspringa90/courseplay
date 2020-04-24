@@ -253,6 +253,9 @@ end
 function courseplay:isTrailer(workTool)
 	return workTool.typeName:match("trailer");
 end;
+function courseplay:isForageWagon(workTool)
+	return workTool.typeName:match("forageWagon");
+end;
 
 -- UPDATE WORKTOOL DATA
 function courseplay:updateWorkTools(vehicle, workTool, isImplement)
