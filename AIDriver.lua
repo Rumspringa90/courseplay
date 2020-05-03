@@ -971,9 +971,11 @@ function AIDriver:dischargeAtUnloadPoint(dt,unloadPointIx)
 
 				--ready with tipping, go forward on the course
 				if tipper.cp.fillLevel == 0 then
-					self.ppc:initialize(self.course:getNextFwdWaypointIx(self.ppc:getCurrentWaypointIx()));
 					tipper:setDischargeState(Dischargeable.DISCHARGE_STATE_OFF)
 					self.pullForward = nil
+					if self:getHasAllTippersClosed() then
+						self.ppc:initialize(self.course:getNextFwdWaypointIx(self.ppc:getCurrentWaypointIx()));
+					end
 				end
 				
 				--do the driving here because if we initalize the ppc, we dont have the unload point anymore
@@ -1039,7 +1041,7 @@ function AIDriver:dischargeAtTipTrigger(dt)
 		if isBGA then
 			if not self.ppc:isReversing() then
 				--we are going forward into the BGA silo, so tip when I'm in and adjust the speed
-				self:tipIntoBGASiloTipTrigger(dt)
+				allowedToDrive = self:tipIntoBGASiloTipTrigger(dt)
 			else
 				--we are reversing into the BGA Silo. We are taking the last rev waypoint as virtual unloadpoint and start tipping there the same way as on unload point
 				allowedToDrive, takeOverSteering = self:dischargeAtUnloadPoint(dt,self.course:getLastReverseAt(self.ppc:getCurrentWaypointIx()))     
@@ -1081,6 +1083,7 @@ function AIDriver:tipIntoStandardTipTrigger()
 end
 
 function AIDriver:tipIntoBGASiloTipTrigger(dt)
+	local wait = false
 	local trigger = self.vehicle.cp.currentTipTrigger
 	self:setOffsetInBGASilo()
 	for _, tipper in pairs (self.vehicle.cp.workTools) do
@@ -1111,7 +1114,7 @@ function AIDriver:tipIntoBGASiloTipTrigger(dt)
 				end
 				
 				local tipState = tipper:getTipState()
-				if tipState == Trailer.TIPSTATE_CLOSED or tipState == Trailer.TIPSTATE_CLOSING then
+				if tipState == Trailer.TIPSTATE_CLOSED then
 					courseplay.debugVehicle(2,self.vehicle,"start tipping")
 					tipper:setDischargeState(Dischargeable.DISCHARGE_STATE_GROUND)
 				end				
@@ -1124,10 +1127,15 @@ function AIDriver:tipIntoBGASiloTipTrigger(dt)
 					tipper:setDischargeState(Dischargeable.DISCHARGE_STATE_OFF)
 				end
 			end
+			
+			if not self:getHasAllTippersClosed() and tipper.cp.fillLevel == 0 then
+				wait = true
+			end
+			
 			self.speed = self.unloadSpeed or self.speed
 		end
 	end
-
+return not wait
 end
 
 function AIDriver:searchForTipTriggers()
@@ -1259,7 +1267,7 @@ end
 function AIDriver:getHasAllTippersClosed()
 	local allClosed = true
 	for _, tipper in pairs (self.vehicle.cp.workTools) do
-    if courseplay:isTrailer(tipper) then
+    if courseplay:isTrailer(tipper) or courseplay:isForageWagon(tipper) then
       if tipper.spec_dischargeable ~= nil and tipper:getTipState() ~= Trailer.TIPSTATE_CLOSED then
         allClosed = false
       end
