@@ -228,6 +228,7 @@ function CombineAIDriver:onWaypointPassed(ix)
 	end
 
 	self:checkDistanceUntilFull(ix)
+	self:shouldStrawSwathBeOn(ix)
 
 	if self.state == self.states.ON_FIELDWORK_COURSE and
 		self.fieldworkState == self.states.UNLOAD_OR_REFILL_ON_FIELD and
@@ -1231,6 +1232,23 @@ function CombineAIDriver:willWaitForUnloadToFinish()
 					self.fieldWorkUnloadOrRefillState == self.states.WAITING_FOR_UNLOAD_AFTER_FIELDWORK_ENDED)
 end
 
+function CombineAIDriver:shouldStrawSwathBeOn(ix)
+	local strawSwath = self.combine.isSwathActive 
+	local headlandStraw = self.vehicle.cp.settings.strawOnHeadland:is(true)
+	local headland = self.course:isOnHeadland(ix)
+
+	-- Do not check headland or set swath if combine is set to no swath
+	if strawSwath then
+		if not headland or (headland and headlandStraw) then
+			strawSwath = true
+		else
+			strawSwath = false
+		end
+
+		self:setStrawSwath(strawSwath)
+	end
+end
+
 function CombineAIDriver:setStrawSwath(enable)
 	local strawSwathCanBeEnabled = false
 	local fruitType = g_fruitTypeManager:getFruitTypeIndexByFillTypeIndex(self.vehicle:getFillUnitFillType(self.combine.fillUnitIndex))
@@ -1239,8 +1257,8 @@ function CombineAIDriver:setStrawSwath(enable)
 		if fruitDesc.hasWindrow then
 			strawSwathCanBeEnabled = true
 		end
+		self.vehicle:setIsSwathActive(enable and strawSwathCanBeEnabled)
 	end
-	self.vehicle:setIsSwathActive(enable and strawSwathCanBeEnabled)
 end
 
 function CombineAIDriver:onDraw()
