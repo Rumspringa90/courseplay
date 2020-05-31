@@ -49,9 +49,6 @@ function courseplay:onLoad(savegame)
 	self.cp.mrAccelrator = nil -- Used when MR needs assitance breaking, Mode2 field driving, Turn Driving, Pathfinding Driving, Drive Driving
 	self.cp.mrHasStopped = nil -- Used in the turn manuver to stop MR on a steep grade
 
-	-- Mode4/6 Pathfinding TODO Move this to its proper place
-	self.cp.isNavigatingPathfinding = false
-
 	--turn maneuver
 	self.cp.turnOnField = true;
 	self.cp.oppositeTurnMode = false;
@@ -61,7 +58,6 @@ function courseplay:onLoad(savegame)
 	self.cp.canBeReversed = nil --bool
 	self.cp.backMarkerOffset = nil --float
 	self.cp.aiFrontMarker = nil --float
-	self.cp.turnTimer = 8000 --int
 	self.cp.noStopOnEdge = false --bool
 	self.cp.noStopOnTurn = false --bool
 	self.cp.noWorkArea = false -- bool
@@ -458,15 +454,16 @@ function courseplay:onLoad(savegame)
 	self.cp.hasGeneratedCourse = false;
 	self.cp.hasValidCourseGenerationData = false;
 	self.cp.ridgeMarkersAutomatic = true;
-	-- TODO: add all course gen settings to this table
-	-- TODO: create an event for MP
+	-- TODO: add all course gen settings to a SettingsContainer
 	self.cp.courseGeneratorSettings = {
 		startingLocation = self.cp.startingCorner,
 		manualStartingLocationWorldPos = nil,
 		islandBypassMode = Island.BYPASS_MODE_NONE,
 		nRowsToSkip = 0,
-		centerMode = courseGenerator.CENTER_MODE_UP_DOWN
+		centerMode = courseGenerator.CENTER_MODE_UP_DOWN,
+		numberOfRowsPerLand = NumberOfRowsPerLandSetting()
 	}
+	self.cp.courseGeneratorSettings.numberOfRowsPerLand:set(6)
 	self.cp.headland = {
 		-- with the old, manual direction selection course generator
 		manuDirMaxNumLanes = 6;
@@ -555,14 +552,6 @@ function courseplay:onLoad(savegame)
 	courseplay:validateCanSwitchMode(self);
 	--courseplay.buttons:setActiveEnabled(self, 'all');
 
-	-- TODO: remove driving mode when mode 2 is finally converted
-	self.cp.drivingMode = DrivingModeSetting(self)
-	
-	--if CpManager.isDeveloper then
-	self.cp.drivingMode:set(DrivingModeSetting.DRIVING_MODE_AIDRIVER)
-	--[[else
-		self.cp.drivingMode:set(DrivingModeSetting.DRIVING_MODE_NORMAL)
-	end]]
 	courseplay:setAIDriver(self, self.cp.mode)
 
 	-- TODO: all vehicle specific settings (HUD or advanced settings dialog) should be moved here
@@ -592,30 +581,6 @@ function courseplay:onPostLoad(savegame)
 	if savegame ~= nil and savegame.key ~= nil and not savegame.resetVehicles then
 		courseplay.loadVehicleCPSettings(self, savegame.xmlFile, savegame.key, savegame.resetVehicles)
 	end
-
-	-- Drive Control (upsidedown)
-	if self.driveControl ~= nil and g_currentMission.driveControl ~= nil then
-		self.cp.hasDriveControl = true;
-		self.cp.driveControl = {
-			hasFourWD = g_currentMission.driveControl.useModules.fourWDandDifferentials and not self.driveControl.fourWDandDifferentials.isSurpressed;
-			hasHandbrake = g_currentMission.driveControl.useModules.handBrake;
-			hasManualMotorStart = g_currentMission.driveControl.useModules.manMotorStart;
-			hasMotorKeepTurnedOn = g_currentMission.driveControl.useModules.manMotorKeepTurnedOn;
-			hasShuttleMode = g_currentMission.driveControl.useModules.shuttle;
-			--alwaysUseFourWD = false;
-			mode = 0;
-			OFF = 0;
-			AWD = 1;
-			AWD_FRONT_DIFF = 2;
-			AWD_REAR_DIFF = 3;
-			AWD_BOTH_DIFF = 4;
-		};
-
-		-- add "always use 4WD" button. This was moved into hud and shown based off conditions in button
-		-- if self.cp.driveControl.hasFourWD then
-		-- 	--courseplay.button:new(self, 5, nil, 'toggleAlwaysUseFourWD', nil, courseplay.hud.col1posX, courseplay.hud.linesPosY[7], courseplay.hud.contentMaxWidth, 0.015, 7, nil, true);
-		-- end
-	end;
 end;
 
 function courseplay:onLeaveVehicle()
@@ -1479,9 +1444,7 @@ function courseplay:loadVehicleCPSettings(xmlFile, key, resetVehicles)
  		self.cp.maxRunNumber		 = Utils.getNoNil(  getXMLInt(xmlFile, curKey .. '#maxRunNumber'),			 11);
  		self.cp.runCounterActive	= Utils.getNoNil(  getXMLBool(xmlFile, curKey .. '#runCounterActive'),		 false);
 		self.cp.saveFuelOptionActive = Utils.getNoNil(  getXMLBool(xmlFile, curKey .. '#saveFuelOption'),			 true);
-		-- TODO: move this into DrivingModeSetting
-		self.cp.drivingMode:set(Utils.getNoNil(  getXMLInt(xmlFile, curKey .. '#drivingMode'),			 0));
-	
+
 		local courses 			  = Utils.getNoNil(getXMLString(xmlFile, curKey .. '#courses'),			 '');
 		self.cp.loadedCourses = StringUtil.splitString(",", courses);
 		courseplay:reloadCourses(self, true);
@@ -1687,8 +1650,7 @@ function courseplay:saveToXMLFile(xmlFile, key, usedModNames)
 	setXMLInt(xmlFile, newKey..".basics #runCounter", runCounter)
 	setXMLBool(xmlFile, newKey..".basics #runCounterActive", self.cp.runCounterActive)
 	setXMLBool(xmlFile, newKey..".basics #saveFuelOption", self.cp.saveFuelOptionActive)
-	setXMLInt(xmlFile, newKey..".basics #drivingMode", self.cp.drivingMode:get())
-	
+
 	--HUD
 	setXMLBool(xmlFile, newKey..".HUD #openHudWithMouse", self.cp.hud.openWithMouse)
 	setXMLBool(xmlFile, newKey..".HUD #showMiniHud", self.cp.hud.showMiniHud)
