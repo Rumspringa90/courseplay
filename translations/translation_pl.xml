@@ -232,8 +232,8 @@
 		<text name="COURSEPLAY_CENTER_MODE_CIRCULAR"						text="Na około" />
 		<text name="COURSEPLAY_CENTER_MODE_SPIRAL"						    text="Spirala" />
 		<text name="COURSEPLAY_CENTER_MODE_LANDS"						    text="Spirala od środka" />
-		<text name="COURSEPLAY_NUMBER_OF_ROWS_PER_LAND"					    text="Number of rows per land" />
-		<text name="COURSEPLAY_NUMBER_OF_ROWS_PER_LAND_TOOLTIP"			    text="When working in lands, how many rows are per land" />
+		<text name="COURSEPLAY_NUMBER_OF_ROWS_PER_LAND"					    text="Liczba rzędów spirali" />
+		<text name="COURSEPLAY_NUMBER_OF_ROWS_PER_LAND_TOOLTIP"			    text="Ustala liczbę rzedów spirali, zanim rozpocznie kolejną" />
 		<text name="COURSEPLAY_ACTIVATED"								 	text="Aktywowane" />
 		<text name="COURSEPLAY_NAME_ONLY" 								 	text="Tylko nazwa" />
 		<text name="COURSEPLAY_NAME_AND_COURSE" 						 	text="Nazwa i Kurs" />
@@ -446,6 +446,11 @@
 		<text name="COURSEPLAY_YES_NO_ENABLE_OPEN_HUD_WITH_MOUSE_GLOBAL"	text="Włącz/Wyłącz otwieranie HUDa prawym przyciskiem myszy (gobalnie)" />
 		<text name="COURSEPLAY_ENABLE_OPEN_HUD_WITH_MOUSE_VEHICLE"			text="HUD na PPM" />
 		<text name="COURSEPLAY_YES_NO_ENABLE_OPEN_HUD_WITH_MOUSE_VEHICLE"	text="Włącz/Wyłącz otwieranie HUDa prawym przyciskiem myszy (obecny pojazd)" />
+
+		<text name="COURSEPLAY_ENABLE_VISUAL_WAYPOINTS_TEMPORARY"			text="Pokaż tymczasowe punkty trasy" />
+		<text name="COURSEPLAY_ENABLE_VISUAL_WAYPOINTS_TEMPORARY_TOOLTIP"	text="Pokazuje kursy tymczasowe (jak wyszukiwanie ścieżki czy zawracanie)" />
+		<text name="COURSEPLAY_HEADLAND_OVERLAP_PERCENT"					text="Nakładna na uwrociach" />
+		<text name="COURSEPLAY_HEADLAND_OVERLAP_PERCENT_TOOLTIP"			text="Nakładka pomiędzy przejazdami na uwrociach określana procentowo" />
 
 		<text name="COURSEPLAY_STRAW_ON_HEADLAND"							text="Wyładunek słomy na uwrociach" />
 		<text name="COURSEPLAY_YES_NO_STRAW_ON_HEADLAND"					text="Włącza/Wyłącza wyładunek słomy na uwrociach" />

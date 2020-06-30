@@ -798,7 +798,7 @@ function courseplay:load_tippers(vehicle, allowedToDrive)
 
 	local currentTrailer = vehicle.cp.workTools[vehicle.cp.currentTrailerToFill];
 
-	local driveOn = vehicle.cp.driveUnloadNow;
+	local driveOn = vehicle.cp.settings.driveUnloadNow:get();
 	if not currentTrailer.cp.realUnloadOrFillNode then
 		currentTrailer.cp.realUnloadOrFillNode = courseplay:getRealUnloadOrFillNode(currentTrailer);
 		if not currentTrailer.cp.realUnloadOrFillNode or not currentTrailer.spec_trailer then
@@ -888,7 +888,7 @@ function courseplay:load_tippers(vehicle, allowedToDrive)
 	end;
 	
 	--if established on a fill trigger go on immediately when level is reached
-	if currentTrailer.cp.currentSiloTrigger ~= nil and (vehicle.cp.totalFillLevelPercent > vehicle.cp.refillUntilPct or vehicle.cp.driveUnloadNow) then
+	if currentTrailer.cp.currentSiloTrigger ~= nil and (vehicle.cp.totalFillLevelPercent > vehicle.cp.refillUntilPct or vehicle.cp.settings.driveUnloadNow:is(true)) then
 		courseplay:setFillOnTrigger(vehicle,currentTrailer,false,currentTrailer.cp.currentSiloTrigger)
 		driveOn = true;
 	end;	
@@ -1774,7 +1774,7 @@ function courseplay:manageCompleteTipping(vehicle,tipper,dt,zSent)
 	local isTipping = tipper.spec_dischargeable.currentRaycastDischargeNode.isEffectActive
 	if tipper:getTipState() == Trailer.TIPSTATE_OPEN and not isTipping then
 		vehicle.cp.takeOverSteering = true
-		if vehicle.cp.saveFuelOptionActive then
+		if vehicle.cp.settings.saveFuelOption:is(true) then
 			courseplay:setCustomTimer(vehicle,'fuelSaveTimer',30)
 		end
 		
@@ -1939,9 +1939,11 @@ end
 --Useable Mode decision. Check Mode Valid = Check for Specializations.
 function courseplay:getIsToolValidForCpMode(workTool,cpModeToCheck)
 	local modeValid = false
-	--Mode3 is still disabled should be (cpModeToCheck == 1 or cpModeToCheck == 2 or cpModeToCheck == 3)
-	--Excluded Filltrigger for (Mode1) and Mode2 (e.g. Watertrailer and Manuretrailer) Mode1 check is Added again later.
-	if ((cpModeToCheck == 1 or cpModeToCheck == 2) and SpecializationUtil.hasSpecialization(Dischargeable ,workTool.specializations) and SpecializationUtil.hasSpecialization(Trailer, workTool.specializations) and workTool.cp.capacity and workTool.cp.capacity > 0.1) and not SpecializationUtil.hasSpecialization(FillTriggerVehicle, workTool.specializations) then
+	--Mode3 is still disabled should be (cpModeToCheck == 2 or cpModeToCheck == 3)
+	--Made Mode1 and Mode2 seperate check to have a cleaner check for Liquid Trailer.
+	if cpModeToCheck == 1 and (SpecializationUtil.hasSpecialization(Dischargeable ,workTool.specializations) and SpecializationUtil.hasSpecialization(Trailer, workTool.specializations) and workTool.cp.capacity and workTool.cp.capacity > 0.1 or SpecializationUtil.hasSpecialization(FillTriggerVehicle, workTool.specializations)) then
+		modeValid = true;
+	elseif cpModeToCheck == 2 and SpecializationUtil.hasSpecialization(Dischargeable ,workTool.specializations) and SpecializationUtil.hasSpecialization(Trailer, workTool.specializations) and workTool.cp.capacity and workTool.cp.capacity > 0.1 and not SpecializationUtil.hasSpecialization(FillTriggerVehicle, workTool.specializations) then
 		modeValid = true;
 	elseif cpModeToCheck == 4 then
 		local isSprayer, isSowingMachine = courseplay:isSprayer(workTool), courseplay:isSowingMachine(workTool);
@@ -1956,7 +1958,7 @@ function courseplay:getIsToolValidForCpMode(workTool,cpModeToCheck)
 			or workTool.cp.hasSpecializationCultivator
 			or courseplay:isCombine(workTool)
 			or workTool.cp.hasSpecializationFruitPreparer
-			or workTool.cp.hasSpecializationPlow
+			or workTool.cp.hasSpecializationPlow		
 			or workTool.cp.hasSpecializationTedder
 			or workTool.cp.hasSpecializationWindrower
 			or workTool.cp.hasSpecializationWeeder
@@ -1970,8 +1972,7 @@ function courseplay:getIsToolValidForCpMode(workTool,cpModeToCheck)
 		then
 			modeValid = true;
 		end
-	--Added Mode1 check again for exclusive check on FillTriggerVehicle, if add in 1st check it will add all Modes to Trailer.
-	elseif (cpModeToCheck == 1 or cpModeToCheck == 8) and SpecializationUtil.hasSpecialization(FillTriggerVehicle, workTool.specializations) then
+	elseif cpModeToCheck == 8 and SpecializationUtil.hasSpecialization(FillTriggerVehicle, workTool.specializations) then
 		modeValid = true;
 
 	elseif cpModeToCheck == 9 and courseplay:hasShovel(workTool) then
@@ -2119,7 +2120,7 @@ function courseplay:checkFuel(vehicle, lx, lz,allowedToDrive)
 		local isFilling = false
 		local dieselIndex = vehicle:getConsumerFillUnitIndex(FillType.DIESEL)
 		local currentFuelPercentage = vehicle:getFillUnitFillLevelPercentage(dieselIndex) * 100;
-		local searchForFuel = not vehicle.isFuelFilling and (vehicle.cp.allwaysSearchFuel and currentFuelPercentage < 99 or currentFuelPercentage < 20);
+		local searchForFuel = not vehicle.isFuelFilling and (vehicle.cp.settings.allwaysSearchFuel:is(true) and currentFuelPercentage < 99 or currentFuelPercentage < 20);
 		if searchForFuel and not vehicle.cp.fuelFillTrigger then
 			local nx, ny, nz = localDirectionToWorld(vehicle.cp.directionNode, lx, 0, lz);
 			local tx, ty, tz = getWorldTranslation(vehicle.cp.directionNode)
@@ -2148,7 +2149,7 @@ function courseplay:checkFuel(vehicle, lx, lz,allowedToDrive)
 end
 
 function courseplay:openCloseCover(vehicle, showCover, fillTrigger)
-	if not vehicle.cp.automaticCoverHandling then
+	if vehicle.cp.settings.automaticCoverHandling:is(false)then
 		return
 	end
 

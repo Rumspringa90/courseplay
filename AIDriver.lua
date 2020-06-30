@@ -172,6 +172,15 @@ function AIDriver:init(vehicle)
 	self:setHudContent()
 end
 
+function AIDriver:writeUpdateStream(streamId)
+	streamWriteString(streamId,self.state.name)
+end 
+
+function AIDriver:readUpdateStream(streamId)
+	local nameState = streamReadString(streamId)
+	self.state = self.states[nameState]
+end
+
 function AIDriver:setHudContent()
 	courseplay.hud:setAIDriverContent(self.vehicle)
 end
@@ -218,6 +227,12 @@ function AIDriver:beforeStart()
 	self.firstReversingWheeledWorkTool = courseplay:getFirstReversingWheeledWorkTool(self.vehicle)
 	-- for now, pathfinding generated courses can't be driven by towed tools
 	self.allowReversePathfinding = self.firstReversingWheeledWorkTool == nil
+	if self.vehicle:getAINeedsTrafficCollisionBox() then
+		courseplay.debugVehicle(3,self.vehicle,"Making sure cars won't stop around us")
+		-- something deep inside the Giants vehicle sets the translation of this box to whatever
+		-- is in aiTrafficCollisionTranslation, if you do a setTranslation() it won't remain there...
+		self.vehicle.spec_aiVehicle.aiTrafficCollisionTranslation[2] = -1000
+	end
 end
 
 --- Start driving
@@ -562,7 +577,7 @@ function AIDriver:onEndCourse()
 			local parkDestination = self.vehicle.spec_autodrive:GetParkDestination(self.vehicle)
 			self.vehicle.spec_autodrive:StartDrivingWithPathFinder(self.vehicle, parkDestination, -3, nil, nil, nil)
 		end
-	elseif self.vehicle.cp.stopAtEnd then
+	elseif self.vehicle.cp.settings.stopAtEnd:is(true) then
 		if self.state ~= self.states.STOPPED then
 			self:stop('END_POINT')
 		end
@@ -736,7 +751,7 @@ end
 function AIDriver:getRecordedSpeed()
 	-- default is the street speed (reduced in corners)
 	local speed = self:getDefaultStreetSpeed(self.ppc:getCurrentWaypointIx()) or self.vehicle.cp.speeds.street
-	if self.vehicle.cp.speeds.useRecordingSpeed then
+	if self.vehicle.cp.settings.useRecordingSpeed:is(true) then
 		-- use default street speed if there's no recorded speed.
 		speed = math.min(self.course:getAverageSpeed(self.ppc:getCurrentWaypointIx(), 4) or speed, speed)
 	end
@@ -841,7 +856,11 @@ end
 
 function AIDriver:drawTemporaryCourse()
 	if not self.course:isTemporary() then return end
-	if not courseplay.debugChannels[self.debugChannel] then return end
+	if self.vehicle.cp.settings.enableVisualWaypointsTemporary:is(false) and
+			not courseplay.debugChannels[self.debugChannel] then
+		return
+	end
+
 	for i = 1, self.course:getNumberOfWaypoints() do
 		local x, y, z = self.course:getWaypointPosition(i)
 		cpDebug:drawPoint(x, y + 3, z, 10, 0, 0)
@@ -856,25 +875,11 @@ end
 function AIDriver:enableCollisionDetection()
 	courseplay.debugVehicle(3,self.vehicle,'Collision detection enabled')
 	self.collisionDetectionEnabled = true
-	-- move the big collision box around the vehicle underground because this will stop
-	-- traffic (not CP drivers though) around us otherwise
-	if self.vehicle:getAINeedsTrafficCollisionBox() then
-		courseplay.debugVehicle(3,self.vehicle,"Making sure cars won't stop around us")
-		-- something deep inside the Giants vehicle sets the translation of this box to whatever
-		-- is in aiTrafficCollisionTranslation, if you do a setTranslation() it won't remain there...
-		self.vehicle.spec_aiVehicle.aiTrafficCollisionTranslation[2] = -1000
-	end
 end
 
 function AIDriver:disableCollisionDetection()
 	courseplay.debugVehicle(3,self.vehicle,'Collision detection disabled')
 	self.collisionDetectionEnabled = false
-	-- move the big collision box around the vehicle back over the ground so
-	-- game traffic around us will stop while we are working on the field
-	if self.vehicle:getAINeedsTrafficCollisionBox() then
-		courseplay.debugVehicle(3,self.vehicle,'Cars will stop around us again.')
-		self.vehicle.spec_aiVehicle.aiTrafficCollisionTranslation[2] = 0
-	end
 end
 
 function AIDriver:detectCollision(dt)
@@ -907,7 +912,7 @@ function AIDriver:detectCollision(dt)
 end
 
 function AIDriver:areBeaconLightsEnabled()
-	return self.vehicle.cp.warningLightsMode > courseplay.lights.WARNING_LIGHTS_NEVER
+	return self.vehicle.cp.settings.warningLightsMode:get() > WarningLightsModeSetting.WARNING_LIGHTS_NEVER
 end
 
 function AIDriver:updateLights()
@@ -1405,7 +1410,7 @@ end
 --- pathfinding considers any collision-free path valid, also outside of the field.
 ---@return boolean true when a pathfinding successfully started
 function AIDriver:driveToPointWithPathfinding(waypoint, zOffset, course, ix, fieldNum)
-	if self.vehicle.cp.realisticDriving then
+	if self.vehicle.cp.settings.useRealisticDriving:is(true) then
 		if not self.pathfinder or not self.pathfinder:isActive() then
 			self.courseAfterPathfinding = course
 			self.waypointIxAfterPathfinding = ix
@@ -1522,7 +1527,7 @@ end;
 --- Is auto stop engine enabled?
 function AIDriver:isEngineAutoStopEnabled()
 	-- do not auto stop engine when auto motor start is enabled as it'll try to restart the engine on each update tick.
-	return self.vehicle.cp.saveFuelOptionActive and not g_currentMission.missionInfo.automaticMotorStartEnabled
+	return self.vehicle.cp.settings.saveFuelOption:is(true) and not g_currentMission.missionInfo.automaticMotorStartEnabled
 end
 
 --- Check the engine state and stop if we have the fuel save option and been stopped too long
@@ -1559,13 +1564,13 @@ function AIDriver:onDraw()
 	end
 
 end
-
+--TODO: do we want to continue using this setter/getter for driveUnloadNow??
 function AIDriver:setDriveUnloadNow(driveUnloadNow)
 	courseplay:setDriveUnloadNow(self.vehicle, driveUnloadNow or false)
 end
 
 function AIDriver:getDriveUnloadNow()
-	return self.vehicle.cp.driveUnloadNow
+	return self.vehicle.cp.settings.driveUnloadNow:get()
 end
 
 function AIDriver:refreshHUD()

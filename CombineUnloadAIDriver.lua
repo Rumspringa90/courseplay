@@ -101,8 +101,18 @@ function CombineUnloadAIDriver:init(vehicle)
 	self.distanceToFront = 0
 	self.vehicle.cp.possibleCombines ={}
 	self.vehicle.cp.assignedCombines ={}
-	self.vehicle.cp.combinesListHUDOffset = 0
+	self.combinesListHUDOffset = 0
 	self.combineToUnloadReversing = 0
+end
+
+function CombineUnloadAIDriver:writeUpdateStream(streamId)
+	AIDriver.writeUpdateStream(self,streamId)
+	streamWriteUIntN(streamId,self.combinesListHUDOffset,6)
+end 
+
+function CombineUnloadAIDriver:readUpdateStream(streamId)
+	AIDriver.readUpdateStream(self,streamId)
+	self.combinesListHUDOffset = streamReadUIntN(streamId,6)
 end
 
 function CombineUnloadAIDriver:setHudContent()
@@ -118,6 +128,7 @@ function CombineUnloadAIDriver:start(startingPoint)
 
 	self:beforeStart()
 	self:addForwardProximitySensor()
+	self:resetPathfinder()
 
 	self.state = self.states.RUNNING
 
@@ -145,6 +156,7 @@ function CombineUnloadAIDriver:dismiss()
 	local x,_,z = getWorldTranslation(self:getDirectionNode())
 	if self.combineToUnload then
 		self.combineToUnload.cp.driver:deregisterUnloader(self)
+		UnloaderEvents:sendRemoveFromCombineEvent(self.vehicle,self.combineToUnload)
 	end
 	self:releaseUnloader()
 	if courseplay:isField(x, z) then
@@ -175,6 +187,14 @@ function CombineUnloadAIDriver:drive(dt)
 		self:renderText(0, 0.1 + renderOffset, "%s: self.onFieldState :%s", nameNum(self.vehicle), self.onFieldState.name)
 		self:driveOnField(dt)
 	end
+end
+
+function CombineUnloadAIDriver:resetPathfinder()
+	self.maxFruitPercent = 10
+	-- prefer driving on field, don't do this too aggressively until we take into account the field owner
+	-- otherwise we'll be driving through others' fields
+	self.offFieldPenalty = 2
+	self.pathfinderFailureCount = 0
 end
 
 -- we want to come to a hard stop while the base class pathfinder is running (starting a course with pathfinding),
@@ -221,6 +241,7 @@ function CombineUnloadAIDriver:driveOnField(dt)
 		if g_updateLoopIndex % 100 == 0 then
 			self.combineToUnload, combineToWaitFor = g_combineUnloadManager:giveMeACombineToUnload(self.vehicle)
 			if self.combineToUnload ~= nil then
+				UnloaderEvents:sendAddToCombineEvent(self.vehicle,self.combineToUnload)
 				self:refreshHUD()
 				courseplay:openCloseCover(self.vehicle, courseplay.OPEN_COVERS)
 				self:startWorking()
@@ -499,6 +520,11 @@ function CombineUnloadAIDriver:driveOnField(dt)
 	AIDriver.drive(self, dt)
 end
 
+function CombineUnloadAIDriver:setCombineToUnloadClient(combineToUnload)
+	self.combineToUnload = combineToUnload
+	self.combineToUnload.cp.driver:registerUnloader(self.vehicle)
+end
+
 function CombineUnloadAIDriver:getTractorsFillLevelPercent()
 	return self.tractorToFollow.cp.totalFillLevelPercent
 end
@@ -516,7 +542,7 @@ function CombineUnloadAIDriver:getRecordedSpeed()
 	-- default is the street speed (reduced in corners)
 	if self.state == self.states.ON_STREET then
 		local speed = self:getDefaultStreetSpeed(self.ppc:getCurrentWaypointIx()) or self.vehicle.cp.speeds.street
-		if self.vehicle.cp.speeds.useRecordingSpeed then
+		if self.vehicle.cp.settings.useRecordingSpeed:is(true) then
 			-- use default street speed if there's no recorded speed.
 			speed = math.min(self.course:getAverageSpeed(self.ppc:getCurrentWaypointIx(), 4) or speed, speed)
 		end
@@ -1084,6 +1110,7 @@ function CombineUnloadAIDriver:releaseUnloader()
 	self.combineJustUnloaded = self.combineToUnload
 	self.combineToUnload = nil
 	self:refreshHUD()
+	UnloaderEvents:sendRelaseUnloaderEvent(self.vehicle,self.combineToUnload)
 end
 
 function CombineUnloadAIDriver:getImSecondUnloader()
@@ -1151,7 +1178,7 @@ function CombineUnloadAIDriver:driveToNodeWithPathfinding(node, xOffset, zOffset
 		local done, path
 		self.pathfindingStartedAt = self.vehicle.timer
 		self.pathfinder, done, path = PathfinderUtil.startPathfindingFromVehicleToNode(
-				self.vehicle, node, xOffset or 0, zOffset or 0, self.allowReversePathfinding, fieldNum, {targetVehicle})
+				self.vehicle, node, xOffset or 0, zOffset or 0, self.allowReversePathfinding, fieldNum, {targetVehicle}, self.maxFruitPercent, self.offFieldPenalty)
 		if done then
 			return self:onPathfindingDone(path)
 		else
@@ -1335,10 +1362,22 @@ end
 function CombineUnloadAIDriver:isPathFound(path)
 	if path and #path > 2 then
 		self:debug('Found path (%d waypoints, %d ms)', #path, self.vehicle.timer - (self.pathfindingStartedAt or 0))
+		self:resetPathfinder()
 		return true
 	else
-		self:error('No path found to %s in %d ms', self.combineToUnload and self.combineToUnload:getName() or 'N/A',
-				self.vehicle.timer - (self.pathfindingStartedAt or 0))
+		self.pathfinderFailureCount = self.pathfinderFailureCount + 1
+		if self.pathfinderFailureCount > 1 then
+			self:error('No path found to %s in %d ms, pathfinder failed at least twice, trying a path through crop and relaxing pathfinder field constraint...',
+						self.combineToUnload and self.combineToUnload:getName() or 'N/A',
+						self.vehicle.timer - (self.pathfindingStartedAt or 0))
+			self.maxFruitPercent = math.huge
+			self.offFieldPenalty = 1
+		elseif self.pathfinderFailureCount == 1 then
+			self:error('No path found to %s in %d ms, pathfinder failed once, relaxing pathfinder field constraint...',
+						self.combineToUnload and self.combineToUnload:getName() or 'N/A',
+						self.vehicle.timer - (self.pathfindingStartedAt or 0))
+			self.offFieldPenalty = 1
+		end
 		return false
 	end
 end
@@ -1524,10 +1563,9 @@ function CombineUnloadAIDriver:startPathfinding(
 		pathfindingCallbackFunc)
 	if not self.pathfinder or not self.pathfinder:isActive() then
 
-		local maxFruitPercent = 10
 		if self:isFruitAt(target, xOffset, zOffset) then
 			self:info('There is fruit at the target, disabling fruit avoidance')
-			maxFruitPercent = math.huge
+			self.maxFruitPercent = math.huge
 		end
 
 		local done, path
@@ -1539,11 +1577,13 @@ function CombineUnloadAIDriver:startPathfinding(
 			-- the same reference everywhere
 			self.pathfinder, done, path = PathfinderUtil.startPathfindingFromVehicleToWaypoint(
 					self.vehicle, target, -xOffset or 0, zOffset or 0, self.allowReversePathfinding,
-					fieldNum, { vehicleToIgnore }, self.vehicle.cp.realisticDriving and 10 or math.huge)
+					fieldNum, { vehicleToIgnore },
+					self.vehicle.cp.settings.useRealisticDriving:is(true) and self.maxFruitPercent or math.huge, self.offFieldPenalty)
 		else
 			self.pathfinder, done, path = PathfinderUtil.startPathfindingFromVehicleToNode(
 					self.vehicle, target, xOffset or 0, zOffset or 0, self.allowReversePathfinding,
-					fieldNum, { vehicleToIgnore }, self.vehicle.cp.realisticDriving and 10 or math.huge)
+					fieldNum, { vehicleToIgnore },
+					self.vehicle.cp.settings.useRealisticDriving:is(true) and self.maxFruitPercent or math.huge, self.offFieldPenalty)
 		end
 		if done then
 			return pathfindingCallbackFunc(self, path)
@@ -1577,7 +1617,7 @@ end
 ------------------------------------------------------------------------------------------------------------------------
 function CombineUnloadAIDriver:canDriveBesideCombine(combine)
 	-- no fruit avoidance, don't care
-	if not self.vehicle.cp.realisticDriving then return true end
+	if self.vehicle.cp.settings.useRealisticDriving:is(false) then return true end
 	-- TODO: or just use combine:pipeInFruit() instead?
 	local leftOk, rightOk = g_combineUnloadManager:getPossibleSidesToDrive(combine)
 	if leftOk and combine.cp.driver:isPipeOnLeft() then
@@ -1704,7 +1744,7 @@ end
 -- Unload combine (stopped)
 ------------------------------------------------------------------------------------------------------------------------
 function CombineUnloadAIDriver:unloadStoppedCombine()
-	self:changeToUnloadWhenFull()
+	if self:changeToUnloadWhenFull() then return end
 	local combineDriver = self.combineToUnload.cp.driver
 	if combineDriver:unloadFinished() then
 		if combineDriver:isWaitingForUnloadAfterCourseEnded() then
@@ -1742,7 +1782,7 @@ function CombineUnloadAIDriver:unloadMovingCombine()
 	self.combineOffset = self:getPipeOffset(self.combineToUnload)
 	self.followCourse:setOffset(-self.combineOffset, 0)
 
-	self:changeToUnloadWhenFull()
+	if self:changeToUnloadWhenFull() then return end
 
 	if self:canDriveBesideCombine(self.combineToUnload) or (self.combineToUnload.cp.driver and self.combineToUnload.cp.driver:isWaitingInPocket()) then
 		self:driveBesideCombine()
@@ -1786,7 +1826,13 @@ function CombineUnloadAIDriver:unloadMovingCombine()
 	if self.combineToUnload.cp.driver:isManeuvering() then
 		self:hold()
 	elseif not self:isOkToStartUnloadingCombine() then
-		self:debug('not in a good position to unload, trying to recover')
+		local dx, _, dz = localToLocal(self.vehicle.rootNode, AIDriverUtil.getDirectionNode(self.combineToUnload), 0, 0, 0)
+		local pipeOffset = self:getPipeOffset(self.combineToUnload)
+		local sameDirection = TurnContext.isSameDirection(AIDriverUtil.getDirectionNode(self.vehicle),
+			AIDriverUtil.getDirectionNode(self.combineToUnload), 15)
+		local willWait = self.combineToUnload.cp.driver:willWaitForUnloadToFinish()
+		self:info('not in a good position to unload, trying to recover')
+		self:info('dx = %.2f, dz = %.2f, offset = %.2f, sameDir = %s, willWait = %s', dx, dz, pipeOffset, tostring(sameDirection), tostring(willWait))
 		-- switch to driving only when not holding for maneuvering combine
 		-- for some reason (like combine turned) we are not in a good position anymore then set us up again
 		self:startDrivingToCombine()
@@ -2032,6 +2078,10 @@ function CombineUnloadAIDriver:onBlockingOtherVehicle(blockedVehicle)
 	end
 end
 
+function CombineUnloadAIDriver:shiftCombinesList(change_by)
+	self.combinesListHUDOffset = MathUtil.clamp(self.combinesListHUDOffset+ change_by,0,#self.vehicle.cp.possibleCombines-6)
+end
+
 ------------------------------------------------------------------------------------------------------------------------
 -- Debug
 ------------------------------------------------------------------------------------------------------------------------
@@ -2055,6 +2105,8 @@ function CombineUnloadAIDriver:renderText(x, y, ...)
 
 	renderText(0.6 + x, 0.2 + y, 0.018, string.format(...))
 end
+
+
 
 
 FillUnit.updateFillUnitAutoAimTarget =  Utils.overwrittenFunction(FillUnit.updateFillUnitAutoAimTarget,CombineUnloadAIDriver.updateFillUnitAutoAimTarget)
