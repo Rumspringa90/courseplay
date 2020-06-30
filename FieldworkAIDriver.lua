@@ -163,11 +163,13 @@ function FieldworkAIDriver:start(startingPoint)
 	self.alignmentEnabled = self.vehicle.cp.alignment.enabled
 	self.vehicle.cp.alignment.enabled = true
 	-- stop at the last waypoint by default
-	self.vehicle.cp.stopAtEnd = true
+	self.vehicle.cp.settings.stopAtEnd:set(true)
 	-- any offset imposed by the driver itself (tight turns, end of course, etc.), additional to any
 	-- tool offsets
 	self.aiDriverOffsetX = 0
 	self.aiDriverOffsetZ = 0
+
+	self.workWidth = courseplay:getWorkWidth(self.vehicle)
 
 	self:setUpCourses()
 
@@ -288,13 +290,11 @@ end
 
 function FieldworkAIDriver:stop(msgReference)
 	self:stopWork()
-	-- Issue with persisting fieldwork data in multiplayer, as the client doesn't maintain the fieldworkcourse (client never calls start)
-	-- Persisted fieldwork data isn't needed by the client anyway, as its all handled by the server (also in start)
-	if g_server ~= nil then
-		-- persist last fieldwork waypoint data (for 'start at current waypoint')
-		self.aiDriverData.lastFieldworkCourseHash = self.fieldworkCourse:getHash()
-		self.aiDriverData.lastFieldworkWaypointIx = self.fieldworkCourse:getCurrentWaypointIx()
-	end
+	
+	-- persist last fieldwork waypoint data (for 'start at current waypoint')
+	self.aiDriverData.lastFieldworkCourseHash = self.fieldworkCourse:getHash()
+	self.aiDriverData.lastFieldworkWaypointIx = self.fieldworkCourse:getCurrentWaypointIx()
+
 	AIDriver.stop(self, msgReference)
 	-- Restore alignment settings. TODO: remove this setting from the HUD and always enable it
 	self.vehicle.cp.alignment.enabled = self.alignmentEnabled
@@ -647,6 +647,7 @@ end
 --- Start the actual work. Lower and turn on implements
 function FieldworkAIDriver:startWork()
 	self:debug('Starting work: turn on and lower implements.')
+	StartStopWorkEvent:sendStartEvent(self.vehicle)
 	-- send the event first and _then_ lower otherwise it sometimes does not turn it on
 	self.vehicle:raiseAIEvent("onAIStart", "onAIImplementStart")
 	self.vehicle:requestActionEventUpdate()
@@ -658,6 +659,7 @@ end
 --- Stop working. Raise and stop implements
 function FieldworkAIDriver:stopWork()
 	self:debug('Ending work: turn off and raise implements.')
+	StartStopWorkEvent:sendStopEvent(self.vehicle)
 	self:raiseImplements()
 	self.vehicle:raiseAIEvent("onAIEnd", "onAIImplementEnd")
 	self.vehicle:requestActionEventUpdate()
@@ -793,12 +795,24 @@ function FieldworkAIDriver:hasSameCourse(otherVehicle)
 	end
 end
 
-function FieldworkAIDriver:getCurrentFieldworkWaypointIx()
-	return self.fieldworkCourse:getCurrentWaypointIx()
+
+function FieldworkAIDriver:getHeadlandProgress()
+	return self.fieldworkCourse:getHeadlandProgress()
+end
+
+function FieldworkAIDriver:getCenterProgress()
+	return self.fieldworkCourse:getCenterProgress()
+end
+
+function FieldworkAIDriver:isOnHeadland()
+	return self.fieldworkCourse:isOnHeadland()
 end
 
 --- When working in a group (convoy), do I have to hold so I don't get too close to the
 -- other vehicles in front of me?
+--- We can't just use the waypoint index as each vehicle in the convoy has its own course
+--- generated and for instance on the headland the vehicles on the inside will have less  
+--- waypoints, so we operate with progress percentage
 function FieldworkAIDriver:manageConvoy()
 	if not self.vehicle.cp.convoyActive then return false end
 	--get my position in convoy and look for the closest combine
@@ -807,12 +821,31 @@ function FieldworkAIDriver:manageConvoy()
 	local closestDistance = math.huge
 	for _, otherVehicle in pairs(CpManager.activeCoursePlayers) do
 		if otherVehicle ~= self.vehicle and otherVehicle.cp.convoyActive and self:hasSameCourse(otherVehicle) then
-			local myWpIndex = self:getCurrentFieldworkWaypointIx()
-			local otherVehicleWpIndex = otherVehicle.cp.driver:getCurrentFieldworkWaypointIx()
+			local isOtherVehicleOnHeadland = otherVehicle.cp.driver:isOnHeadland()
+			local myProgress, length, otherProgress
+			if self:isOnHeadland() then
+				myProgress, length = self:getHeadlandProgress()
+				otherProgress = otherVehicle.cp.driver:getHeadlandProgress()
+				if not otherVehicle.cp.driver:isOnHeadland() and self.fieldworkCourse:isOnHeadland(1) then
+					-- other vehicle past the headland now and the course starts with the headland
+					otherProgress = otherProgress + otherVehicle.cp.driver:getCenterProgress()
+				end
+				self:debugSparse('convoy on headland: my progress %.1f%%, other progress %.1f%%, 100%% %d',
+				 	myProgress * 100, otherProgress * 100, length)
+			else
+				myProgress, length = self:getCenterProgress()
+				otherProgress = otherVehicle.cp.driver:getCenterProgress()
+				if otherVehicle.cp.driver:isOnHeadland() and not self.fieldworkCourse:isOnHeadland(1) then
+					-- other vehicle past the center now and the course ends with the headland
+					otherProgress = otherProgress + otherVehicle.cp.driver:getHeadlandProgress()
+				end
+				self:debugSparse('convoy on center: my progress %.1f%%, other progress %.1f%%, 100%% %d', 
+					myProgress * 100, otherProgress * 100, length)
+			end	
 			total = total + 1
-			if myWpIndex < otherVehicleWpIndex then
+			if myProgress < otherProgress then
 				position = position + 1
-				local distance = (otherVehicleWpIndex - myWpIndex) * courseGenerator.waypointDistance
+				local distance = (otherProgress - myProgress) * length
 				if distance < closestDistance then
 					closestDistance = distance
 				end
@@ -969,6 +1002,7 @@ function FieldworkAIDriver:lowerImplements()
 		implement.object:aiImplementStartLine()
 	end
 	self.vehicle:raiseStateChange(Vehicle.STATE_CHANGE_AI_START_LINE)
+		
 	if FieldworkAIDriver.hasImplementWithSpecialization(self.vehicle, SowingMachine) or self.ppc:isReversing() then
 		-- sowing machines want to stop while the implement is being lowered
 		-- also, when reversing, we assume that we'll switch to forward, so stop while lowering, then start forward
@@ -1398,4 +1432,9 @@ end
 
 function FieldworkAIDriver:setLightsMask(vehicle)
 	vehicle:setLightsTypesMask(courseplay.lights.HEADLIGHT_FULL)
+end
+
+function FieldworkAIDriver:getVehicleWidth()
+	-- TODO: get folded/unfolded width according to state
+	return self.workWidth
 end
