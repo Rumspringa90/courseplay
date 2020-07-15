@@ -96,7 +96,7 @@ function CombineAIDriver:init(vehicle)
 		if self.vehicle.spec_foldable then
 			wasFolded = not self.vehicle.spec_foldable:getIsUnfolded()
 			if wasFolded then
-				Foldable.setAnimTime(self.vehicle.spec_foldable, 0, true)
+				Foldable.setAnimTime(self.vehicle.spec_foldable, self.vehicle.spec_foldable.startAnimTime == 1 and 0 or 1, true)
 			end
 		end
 		if self.pipe.currentState == CombineAIDriver.PIPE_STATE_CLOSED then
@@ -128,7 +128,7 @@ function CombineAIDriver:init(vehicle)
 		end
 		if self.vehicle.spec_foldable then
 			if wasFolded then
-				Foldable.setAnimTime(self.vehicle.spec_foldable, 1, true)
+				Foldable.setAnimTime(self.vehicle.spec_foldable, self.vehicle.spec_foldable.startAnimTime == 1 and 1 or 0, true)
 			end
 		end
 	else
@@ -1002,7 +1002,10 @@ function CombineAIDriver:handleCombinePipe()
 	if self:isFillableTrailerUnderPipe() or self:isAutoDriveWaitingForPipe() or (self:isWaitingForUnload() and self.vehicle.cp.settings.pipeAlwaysUnfold:is(true)) then
 		self:openPipe()
 	else
-		self:closePipe()
+		--wait until the objects under the pipe are gone
+		if self.pipe.numObjectsInTriggers <=0 then
+			self:closePipe()
+		end
 	end
 end
 
